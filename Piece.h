@@ -1,27 +1,12 @@
 #pragma once
 #include "GameObject.h"
 
-//移動方向
-enum MoveDir
-{
-    None,
-    Left,
-    Right,
-    Up,
-    Down
-};
-
-/*
-class PieceManager; // PieceManagerはProgram中のどこかにいるクラスですよの前方宣言
-*/
-
 //Pieceは駒を表すクラス
 //継承元はGameObjectクラス
 class Piece :
     public GameObject
 {
 private:
-    
     ColorF pieceColor;  //駒の色
     int gridIndexX;     //盤面上のX座標
     int gridIndexY;     //盤面上のY座標
@@ -40,8 +25,7 @@ private:
     Vec2 lastClickPos;  //最後にクリックした座標
 
     Vec2 position;      //位置
-    //PieceManager* pieceManager;    //駒を全体管理している物への参照
-
+    
     float opacity;      //透明度(　0.0　～　1.0　)
     float eraseTransitionTime;  //駒が消えるための変化
     bool isEraseStart;  //消す処理が始まったか判定
@@ -50,12 +34,19 @@ private:
     bool IsValidMoveDir(MoveDir); // 移動方向は有効かどうか判定
     void UpdateGridIndex(); // 移動完了後に盤面上の座標を更新する処理
     void Reset();       //駒が消えて再利用するために状態やデータをリセットする処理
+
+    bool IsInputMove;   //入力により移動された駒かどうか
+    MoveDir lastMovedDir;//最後動いた方向
+
+    bool isMatchProcessWait;//3Match処理待ち中か判定用
+    OtherPieceInfo otherPiece;//入力して移動してことにより、移動先にいる駒の座標
+    int dropCount;      //落下する回数
+
 public:
     Piece(Vec2 initPos, String goName, int x, int y, int pieceSize);//コンストラクタ
     void Update() override; //親クラスのvirtual関数をオーバーライド(約束事を満たすため)
     void Draw() override; //親クラスのvirtual関数をオーバーライド(約束事を満たすため)
     void MoveTo(MoveDir dir); //外から動かすための処理(引数は方向)
-    //void SetPieceManager(PieceManager* manager);// マネージャーへの参照
     bool IsSameGridIndex(int x, int y);// 盤面上の座標が同じかを判定する
 
     int GetGridIndexX();// X座標の公開
@@ -64,4 +55,5 @@ public:
 
     void RandomizeColor();// ランダムで色を変更
     void ErasePiece();// 3マッチ発生による消し処理
+    void Drop(int time);// 落下処理（渡された回数分下に移動する)
 };

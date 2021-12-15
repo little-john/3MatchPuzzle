@@ -28,14 +28,14 @@ Piece::Piece(Vec2 initPos, String goName, int x, int y, int pieceSize) : GameObj
 	// 消える変化の初期化
 	eraseTransitionTime = 0.0f;
 
-	
+	// 各フラグの初期化
 	isEraseStart = false;
-}
+	IsInputMove = false;
+	isMatchProcessWait = false;
 
-//void Piece::SetPieceManager(PieceManager* manager)
-//{
-//	pieceManager = manager;
-//}
+	lastMovedDir = None;
+	dropCount = 0;
+}
 
 bool Piece::IsSameGridIndex(int x, int y) 
 {
@@ -61,7 +61,7 @@ void Piece::RandomizeColor()
 {
 	//駒の色を抽選して持っておく
 	//駒の種類の色定義
-	ColorF pieceColors[7] = {
+	ColorF pieceColors[MaxColor] = {
 		Palette::Red,
 		Palette::Darkgreen,
 		Palette::Darkblue,
@@ -71,15 +71,10 @@ void Piece::RandomizeColor()
 		Palette::Lightcyan
 	};
 
-	//生成時にランダムで色を決める
-	int pieceType = Random(6);//入れた数字まで含まれます(0～6)
+	//ランダムで色を決める
+	//入れた数字まで含まれます
+	int pieceType = Random(MaxColor-1);
 	pieceColor = pieceColors[pieceType];
-}
-
-void Piece::ErasePiece()
-{
-	isEraseStart = true;
-	eraseTransitionTime = 0.0f;
 }
 
 bool Piece::IsValidMoveDir(MoveDir targetDir)
@@ -134,7 +129,7 @@ void Piece::Update()
 	// 透明度の変化をテストする処理
 	// TestOpacity(opacity);
 
-	//動いてたら
+	// 移動処理
 	if (isMoving)
 	{
 		Move();
@@ -143,40 +138,70 @@ void Piece::Update()
 		if (moveStartElapsedTime >= 1)
 		{
 			Move();
-			
 			UpdateGridIndex(); // 盤面座標の更新
 
 			dir = None;
 			moveStartElapsedTime = 0;
 			isMoving = false;
 
-			// 駒の移動が完了したら、3Matchが発生したかどうかの判定処理を実行
-			
-			PieceManager::GetInstance()->Process3MatchLogic(gridIndexX, gridIndexY);
-			
+			// 他の駒が移動終わってない可能性があるので、
+			// 自分の移動が終わってもすぐマッチング処理を行わずに、
+			// 全員が移動処理終わるまでまってから、マッチング処理をするよう
+			// フラグを立てる
+			isMatchProcessWait = true;
 
-			//ErasePiece(); // テストで駒が移動終わったら消してみる
-			PieceManager::GetInstance() -> SetInputValid(true);
+			// 処理待ちカウントを減らす
+			PieceManager::GetInstance() ->ProcessLock(false);
 		}
 	}
+	// 消す処理
 	else if (isEraseStart) 
 	{
-		eraseTransitionTime += Scene::DeltaTime() * 2;
+		eraseTransitionTime += Scene::DeltaTime() * PieceEraseSpeed;
 		eraseTransitionTime = (eraseTransitionTime > 1.0f) ? 1.0f : eraseTransitionTime;
 		opacity = Math::Lerp(1.0f, 0.0f, eraseTransitionTime);
 		
-		if (eraseTransitionTime >= 1.0f) {
+		if (eraseTransitionTime >= 1.0f) 
+		{
 			Reset();
+			// 処理待ちカウントを減らす
+			PieceManager::GetInstance()->ProcessLock(false);
 		}
 	}
-	else//入力があったら
+	else
 	{
-		// PieceManagerの入力が無効ならばなにもしない
+		// PieceManagerの処理待ち中はなにもしない
 		if (PieceManager::GetInstance()->IsInputValid() == false)
 		{
 			return;
 		}
 
+		if (isMatchProcessWait)
+		{
+			// 自分自身が入力により移動させられた
+			// （もしくは、落下した）駒の場合のみ
+			// 3マッチの判定を行うようにする
+			if (IsInputMove)
+			{
+				IsInputMove = false;
+
+				// 駒の移動が完了したら、3Matchが発生したかどうかの判定処理を実行
+				bool isMatchHappensSelf = PieceManager::GetInstance()->Process3MatchLogic(gridIndexX, gridIndexY);
+				bool isMatchHappensOther = PieceManager::GetInstance()->Process3MatchLogic(otherPiece.x, otherPiece.y);
+
+				// 3マッチしなかったら戻す
+				if (isMatchHappensSelf == false && isMatchHappensOther == false)
+				{
+					PieceManager::GetInstance()->Return(gridIndexX, gridIndexY, lastMovedDir);
+				}
+			}
+
+			lastMovedDir = None;
+			isMatchProcessWait = false;
+			return;
+		}
+
+		// 入力判定処理
 		if (drawObject.leftClicked())
 		{
 			isClicked = true;
@@ -217,9 +242,13 @@ void Piece::Update()
 			{
 				if (IsValidMoveDir(dir)) 
 				{
+					IsInputMove = true;
+					lastMovedDir = dir;
 					MoveTo(dir);
-					PieceManager::GetInstance()->MoveOtherPiece(gridIndexX, gridIndexY, dir);
-					PieceManager::GetInstance()->SetInputValid(false);
+					otherPiece = PieceManager::GetInstance()->MoveOtherPiece(gridIndexX, gridIndexY, dir);
+					
+					// 処理待ちカウントをあげる
+					PieceManager::GetInstance()->ProcessLock(true);
 				}
 				else
 					dir = None;
@@ -245,23 +274,27 @@ void Piece::UpdateGridIndex()
 	case Down:
 		gridIndexY++;
 		break;
+	
 	}
 }
 
 void Piece::Reset()
 {
 	// 盤面上の座標を盤面外の所におく
-	gridIndexY = -1;
+	PieceManager::GetInstance()->CalcResetYIndex(gridIndexX, gridIndexY);
 
-	//色の抽選
+	// 色の抽選
 	RandomizeColor();
 
-	//初期位置の設定
+	// 初期位置の設定
 	position = calcDrawPos();
 
-	//フラグ変数の初期化
+	// フラグ変数の初期化
 	isMoving = false;
 	isClicked = false;
+	isEraseStart = false;
+	IsInputMove = false;
+	isMatchProcessWait = false;
 
 	// 透明度の初期化
 	opacity = 1.0;
@@ -269,7 +302,7 @@ void Piece::Reset()
 	// 消える変化の初期化
 	eraseTransitionTime = 0.0f;
 
-	isEraseStart = false;
+	lastMovedDir = None;
 }
 
 void Piece::Draw()
@@ -288,18 +321,21 @@ void Piece::Draw()
 		.drawArc(60_deg, 60_deg, 32, 0, ColorF(0, 0, 0, 0.2 * opacity))
 		.drawArc(120_deg, 30_deg, 32, 0, ColorF(0, 0, 0, 0.15 * opacity))
 		.drawArc(150_deg, 30_deg, 32, 0, ColorF(0, 0, 0, 0.1 * opacity))
-		.drawArc(180_deg, 30_deg, 32, 0, ColorF(0, 0, 0, 0.05 * opacity))
-		.drawFrame(2, ColorF(0, 0, 0, opacity));
+		.drawArc(180_deg, 30_deg, 32, 0, ColorF(0, 0, 0, 0.05 * opacity));
+		
+	//Vec2 debugPos = position + Vec2(-12, 0);
 }
 
 void Piece::Move()
 {
-	moveStartElapsedTime += Scene::DeltaTime() * 3; // 経過時間にdeltaTimeを加算
+	// 経過時間にdeltaTimeを加算
+	moveStartElapsedTime += Scene::DeltaTime() * PieceMoveSpeed; 
 	
 	// 経過時間を1までまるめておく
 	moveStartElapsedTime = (moveStartElapsedTime > 1) ? 1 : moveStartElapsedTime;
 	
-	position = Math::Lerp(fromPos, destPos, moveStartElapsedTime); // 直線上の移動(開始、終了、経過)
+	// 直線上の移動(開始、終了、経過)
+	position = Math::Lerp(fromPos, destPos, moveStartElapsedTime); 
 }
 
 void Piece::MoveTo(MoveDir direction)
@@ -312,20 +348,24 @@ void Piece::MoveTo(MoveDir direction)
 	dir = direction;
 	moveStartElapsedTime = 0.0f;
 
+	int moveLength = size * 2;
 	switch (dir)
 	{
 
 	case Left:
-		destPos.x -= size * 2;
+		destPos.x -= moveLength;
 		break;
 	case Right:
-		destPos.x += size * 2;
+		destPos.x += moveLength;
 		break;
 	case Up:
-		destPos.y -= size * 2;
+		destPos.y -= moveLength;
 		break;
 	case Down:
-		destPos.y += size * 2;
+		destPos.y += moveLength;
+		break;
+	case MoveDir::Drop: // 落下の場合は通常移動距離 * 落下回数
+		destPos.y += moveLength * dropCount;
 		break;
 	default:
 		break;
@@ -345,4 +385,31 @@ Vec2 Piece::calcDrawPos()
 	drawPos.x += gridIndexX * size * 2 + size;
 	drawPos.y += gridIndexY * size * 2 + size;
 	return drawPos;
+}
+
+void Piece::ErasePiece()
+{
+	// 既に消し処理中だったら即リターン
+	if (isEraseStart)return;
+
+	isEraseStart = true;
+	eraseTransitionTime = 0.0f;
+
+	// 処理待ちカウントをあげる
+	PieceManager::GetInstance()->ProcessLock(true);
+}
+
+void Piece::Drop(int time)
+{
+	dropCount = time;
+	MoveTo(MoveDir::Drop);
+	gridIndexY += dropCount;
+	dropCount = 0;
+
+	// 落下終了時にマッチング処理を行いたいので
+	// フラグを立てる
+	IsInputMove = true;
+
+	// 処理待ちカウントをあげる
+	PieceManager::GetInstance()->ProcessLock(true);
 }

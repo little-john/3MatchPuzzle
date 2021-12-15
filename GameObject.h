@@ -1,5 +1,24 @@
 #pragma once
 #include<Siv3D.hpp>
+#include "Common.h"
+
+struct OtherPieceInfo {
+	int x;
+	int y;
+};
+
+/// <summary>
+/// ˆÚ“®•ûŒü
+/// </summary>
+enum MoveDir
+{
+	None,
+	Left,
+	Right,
+	Up,
+	Down,
+	Drop
+};
 
 class GameObject
 {

@@ -1,18 +1,19 @@
 #include "PieceManager.h"
+#include "CalcUtil.h"
+
+PieceManager* PieceManager::instance = NULL; // 初期化
 
 PieceManager* PieceManager::GetInstance()
 {
 	return instance;
 }
 
-PieceManager* PieceManager::instance = nullptr; // 初期化
-
 PieceManager::PieceManager(Vec2 initPos, String goName, int pieceSize)
 	:GameObject(initPos,goName)
 {
-	for (int y = 0; y < 7; y++)
+	for (int y = 0; y < MaxGridY; y++)
 	{
-		for (int x = 0; x < 7; x++)
+		for (int x = 0; x < MaxGridX; x++)
 		{
 			Piece piece(
 					initPos, //初期位置
@@ -21,16 +22,15 @@ PieceManager::PieceManager(Vec2 initPos, String goName, int pieceSize)
 					y,						//盤面上のY座標
 					pieceSize				//駒のサイズ(半径)
 				);
-
-			//piece.SetPieceManager(this);
-
 			pieces << piece;
 		}
 	}
 
+	matchHappenIndices.clear();
+
 	Shuffle();
 
-	isInputValid = true;
+	lockCount = 0;
 
 	instance = this;
 }
@@ -40,6 +40,28 @@ void PieceManager::Update()
 	for (auto it = pieces.begin(); it != pieces.end(); ++it)
 	{
 		it->Update();
+	}
+
+	// Spaceキー押したら全駒の色を降りなおす（デバッグ用)
+	if (KeySpace.down()) 
+	{
+		for (auto it = pieces.begin(); it != pieces.end(); ++it) 
+		{
+			it->RandomizeColor();
+		}
+
+		Shuffle();
+	}
+
+	// 落下処理が発生してたら
+	if (isDrop) 
+	{
+		// 他の処理の完了を待ち、実行中の処理がなければ
+		if (IsInputValid()) 
+		{
+			Drop(); // 落下させる
+			isDrop = false;
+		}
 	}
 }
 
@@ -51,9 +73,8 @@ void PieceManager::Draw()
 	}
 }
 
-void PieceManager::MoveOtherPiece(int x, int y, MoveDir dir)
+OtherPieceInfo PieceManager::MoveOtherPiece(int x, int y, MoveDir dir)
 {
-	// TODO: 
 	// xとyをdirをみて、探す対象の txとtyに変換する
 	// 配列の中から txとtyが一致するpieceを探す
 	// 見つかったpieceを dirの逆方向に移動させる
@@ -83,33 +104,37 @@ void PieceManager::MoveOtherPiece(int x, int y, MoveDir dir)
 	
 	}
 
+	OtherPieceInfo info = {};
 	Piece* otherPiece = GetPieceAtIndex(cx, cy);
+	if (otherPiece == NULL)return info;
+
 	otherPiece->MoveTo(targetDir);
+	info.x = x;
+	info.y = y;
+	return info;
 }
 
 Piece* PieceManager::GetPieceAtIndex(int cx, int cy)
 {
-	for (int i=0, max = pieces.size(); i < max; i++)
+	for (auto it = pieces.begin(); it != pieces.end(); ++it)
 	{
-		if ( pieces[i].IsSameGridIndex(cx,cy))
-		{
-			return &pieces[i];
-		}
+		if (it->IsSameGridIndex(cx, cy))return &(*it);
 	}
-	
-	assert(cx >= 0 && cy >= 0);
 
-	return nullptr;
+	return NULL;
 }
 
-void PieceManager::SetInputValid(bool flag)
+void PieceManager::ProcessLock(bool flag)
 {
-	isInputValid = flag;
+	if (flag)lockCount++;
+	else lockCount--;
+	
+	lockCount = (lockCount < 0) ? 0 : lockCount;
 }
 
 bool PieceManager::IsInputValid()
 {
-	return isInputValid;
+	return lockCount == 0;
 }
 
 void PieceManager::Shuffle()
@@ -130,7 +155,7 @@ void PieceManager::Shuffle()
 			
 			if (cy > 1) // 一番左から２列内の駒の場合、yが1以上だったら(縦方向のみ判定) 
 			{
-				while (p->GetPieceColor() == GetPieceAtIndex(cx, oneUp)->GetPieceColor() ||
+				while (p->GetPieceColor() == GetPieceAtIndex(cx, oneUp)->GetPieceColor() &&
 					p->GetPieceColor() == GetPieceAtIndex(cx, twoUp)->GetPieceColor())
 				{
 					p->RandomizeColor();
@@ -144,7 +169,7 @@ void PieceManager::Shuffle()
 
 			if (cx > 1) // 一番上から２行内の駒の場合、xが1以上だったら(横方向のみ判定)
 			{
-				while (p->GetPieceColor() == GetPieceAtIndex(oneLeft, cy)->GetPieceColor() ||
+				while (p->GetPieceColor() == GetPieceAtIndex(oneLeft, cy)->GetPieceColor() &&
 					p->GetPieceColor() == GetPieceAtIndex(twoLeft, cy)->GetPieceColor() )
 				{
 					p->RandomizeColor();
@@ -155,9 +180,9 @@ void PieceManager::Shuffle()
 		}
 
 		// 左に２つ、上に２つまでの駒の色を見て、自分と同じ色なら、違う色になるまで抽選し続ける
-		while( p->GetPieceColor() == GetPieceAtIndex(oneLeft,cy)->GetPieceColor() ||
+		while( p->GetPieceColor() == GetPieceAtIndex(oneLeft,cy)->GetPieceColor() &&
 			p->GetPieceColor() == GetPieceAtIndex(twoLeft, cy)->GetPieceColor() ||
-			p->GetPieceColor() == GetPieceAtIndex(cx, oneUp)->GetPieceColor() ||
+			p->GetPieceColor() == GetPieceAtIndex(cx, oneUp)->GetPieceColor() &&
 			p->GetPieceColor() == GetPieceAtIndex(cx, twoUp)->GetPieceColor())
 		{ 
 			p->RandomizeColor();
@@ -166,98 +191,115 @@ void PieceManager::Shuffle()
 	}
 }
 
-void PieceManager::Process3MatchLogic(int cx, int cy)
+bool PieceManager::Process3MatchLogic(int cx, int cy)
 {
 	// 3match処理で見つかった駒達を保持する用
-	Array<Piece> matchPieces;
+	Array<Piece*> matchPieces;
 
+	Piece* checkPiece = GetPieceAtIndex(cx, cy);
+	if (checkPiece == NULL)return false;
+	
 	// チェックしたい色
-	ColorF checkColor = GetPieceAtIndex(cx, cy)->GetPieceColor();
+	ColorF checkColor = checkPiece->GetPieceColor();
+	// 自分の位置から左端まで判定
+	int leftCount = CalcUtil::GetLeftMatchCount(cx, cy, checkColor);
+	// 自分の位置から右端まで判定
+	int rightCount = CalcUtil::GetRightMatchCount(cx, cy, checkColor);
+	// 自分の位置から上端まで判定
+	int upCount = CalcUtil::GetUpMatchCount(cx, cy, checkColor);
+	// 自分の位置から下端まで判定
+	int downCount = CalcUtil::GetDownMatchCount(cx, cy, checkColor);
 
-	// 横一列判定
-	// (一番左だったり、一番右から２コマ以内なら3マッチが発生しないので
-	// その場合は判定しない（そのため、判定する範囲は 左や右から２コマ目からにする)
-	if (cx >= 2 && cx < 5) 
+	// 横判定
+	int totalCountRow = leftCount + rightCount;
+	if (totalCountRow >= 2) 
 	{
-		int count = 0;
-		
-		// 自分の位置から左端まで判定
-		int x = cx -1 ;
-		
-		while (x >= 0)
+		for (int i = -leftCount; i <= rightCount; i++)
 		{
-			Piece* p = GetPieceAtIndex(x, cy);
-
-			if (p == NULL) {
-				Print << U"{} {}"_fmt(x, cy);
-				return;
-			}
-
-			if ((*p).GetPieceColor() == checkColor)
-			{
-				count++;
-			}
-			else 
-			{
-				break;
-			}
-			x--;
-		}
-
-		// countが２つ以上あったら（左方向に対して３マッチが発生している)
-		// 消すべき駒を配列にいれておく
-		if (count >= 2)
-		{
-			for (int i=1; i <= count; i++)
-			{
-				matchPieces << *GetPieceAtIndex(cx - i, cy);
-			}
-		}
-
-		count = 0; // 見る方向が異なるのでリセットする
-
-		// 自分の位置から右端まで判定
-		x = cx + 1;
-
-		while (x < 5)
-		{
-			Piece* p = GetPieceAtIndex(x, cy);
-
-			if ((*p).GetPieceColor() == checkColor)
-			{
-				count++;
-			}
-			else
-			{
-				break;
-			}
-			x++;
-		}
-
-		//Print << U"Right:{}"_fmt(count);
-
-		// countが２つ以上あったら（右方向に対して３マッチが発生している)
-		// 消すべき駒を配列にいれておく
-		if (count >= 2)
-		{
-			for (int i = 1; i <= count; i++)
-			{
-				matchPieces << *GetPieceAtIndex(cx + i, cy);
-			}
+			matchPieces << GetPieceAtIndex(cx + i, cy);
 		}
 	}
 
+	// 縦判定
+	int totalCountCol = upCount + downCount;
+	if (totalCountCol >= 2)
+	{
+		for (int i = -upCount; i <= downCount; i++)
+		{
+			matchPieces << GetPieceAtIndex(cx, cy + i);
+		}
+	}
+
+	// 消す処理
 	for (auto it = matchPieces.begin(); it != matchPieces.end(); ++it)
 	{
-		it->ErasePiece();
+		(*it)->ErasePiece();
+		OtherPieceInfo info;
+		info.x = (*it)->GetGridIndexX();
+		info.y = (*it)->GetGridIndexY();
+		CalcUtil::AddToArrayIfNotExists(info, matchHappenIndices);
 	}
 
+	if (!isDrop)isDrop = matchPieces.size() >= 3;
 
-	// 縦一列判定
-	// (一番上だったり、一番下から２コマ以内なら3マッチが発生しないので
-	// その場合は判定しない（そのため、判定する範囲は 上や下から２コマ目からにする)
-	if (cy >= 2 && cy < 5)
+	return matchPieces.size() >= 3;
+}
+
+void PieceManager::Return(int x, int y, MoveDir orginalDir)
+{
+	Piece* self = GetPieceAtIndex(x, y);
+	MoveDir selfMoveDir = orginalDir;
+
+	switch (selfMoveDir)
 	{
-	
+	case Left:
+		selfMoveDir = Right;
+		break;
+	case Right:
+		selfMoveDir = Left;
+		break;
+	case Up:
+		selfMoveDir = Down;
+		break;
+	case Down:
+		selfMoveDir = Up;
+		break;
 	}
+
+	if (self == NULL)return;
+	if (selfMoveDir == None)return;
+
+	ProcessLock(true);
+
+	self->MoveTo(selfMoveDir);
+
+	MoveOtherPiece(x, y, selfMoveDir);
+}
+
+void PieceManager::Drop() 
+{
+	for (auto it = pieces.begin(); it != pieces.end(); ++it)
+	{
+		int px = it->GetGridIndexX();
+		int py = it->GetGridIndexY();
+		int dropCount = CalcUtil::GetDropCount(px, py, matchHappenIndices);
+		if (dropCount == 0)continue;
+		it->Drop(dropCount);
+	}
+
+	matchHappenIndices.clear();
+}
+
+void PieceManager::CalcResetYIndex(int x, int& y)
+{
+	int checkY = -1;
+	while (true)
+	{
+		Piece* p = GetPieceAtIndex(x, checkY);
+		if (p == NULL)break;
+
+		checkY--;
+	}
+
+	y = checkY;
 }

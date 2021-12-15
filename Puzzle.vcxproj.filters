@@ -111,6 +111,15 @@
     <ClCompile Include="PieceManager.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CalcUtil.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="PuzzleBoard.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="BattleManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Image Include="App\icon.ico">
@@ -152,7 +161,7 @@
     <Image Include="App\dungeon.jpg">
       <Filter>Resource Files</Filter>
     </Image>
-    <Image Include="App\dragon.png">
+    <Image Include="App\monster.png">
       <Filter>Resource Files</Filter>
     </Image>
   </ItemGroup>
@@ -398,6 +407,18 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="PieceManager.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CalcUtil.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="PuzzleBoard.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Common.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="BattleManager.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
